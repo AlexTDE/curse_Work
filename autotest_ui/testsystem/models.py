@@ -91,3 +91,18 @@ class Defect(models.Model):
 
     def __str__(self):
         return f"Defect {self.id} tc={self.testcase_id} severity={self.severity}"
+
+
+# Импортируем модели версионирования
+from .versioning_models import TestCaseVersion, ReferenceUpdateRequest
+
+# Экспортируем все модели для удобства
+__all__ = [
+    'Run',
+    'TestCase', 
+    'UIElement',
+    'CoverageMetric',
+    'Defect',
+    'TestCaseVersion',
+    'ReferenceUpdateRequest',
+]
