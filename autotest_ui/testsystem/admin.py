@@ -11,8 +11,23 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth import get_user_model
 
 from .models import CoverageMetric, Defect, Run, TestCase, UIElement
-from .versioning_models import TestCaseVersion, ReferenceUpdateRequest
-from .analytics import AnalyticsService
+
+# Пытаемся импортировать модели версионирования (могут еще не быть созданы)
+try:
+    from .versioning_models import TestCaseVersion, ReferenceUpdateRequest
+    VERSIONING_AVAILABLE = True
+except ImportError:
+    VERSIONING_AVAILABLE = False
+    TestCaseVersion = None
+    ReferenceUpdateRequest = None
+
+# Пытаемся импортировать аналитику (может еще не быть создана)
+try:
+    from .analytics import AnalyticsService
+    ANALYTICS_AVAILABLE = True
+except ImportError:
+    ANALYTICS_AVAILABLE = False
+    AnalyticsService = None
 
 User = get_user_model()
 
@@ -24,15 +39,21 @@ class CustomAdminSite(admin.AdminSite):
     
     def get_urls(self):
         urls = super().get_urls()
-        custom_urls = [
-            path('analytics/', self.admin_view(self.analytics_view), name='analytics'),
-        ]
-        return custom_urls + urls
+        if ANALYTICS_AVAILABLE:
+            custom_urls = [
+                path('analytics/', self.admin_view(self.analytics_view), name='analytics'),
+            ]
+            return custom_urls + urls
+        return urls
     
     def analytics_view(self, request):
-        """
-        Представление для аналитической панели.
-        """
+        """Представление для аналитической панели."""
+        if not ANALYTICS_AVAILABLE:
+            return render(request, 'admin/error.html', {
+                'title': 'Ошибка',
+                'message': 'Модуль аналитики не доступен',
+            })
+        
         days = int(request.GET.get('days', 30))
         
         context = {
@@ -57,7 +78,7 @@ class UIElementInline(admin.TabularInline):
     readonly_fields = ('bbox', 'confidence', 'element_type', 'text')
     extra = 0
     can_delete = False
-    max_num = 0  # Не разрешать добавление новых
+    max_num = 0
     
     def has_add_permission(self, request, obj=None):
         return False
@@ -283,140 +304,47 @@ class CoverageMetricAdmin(admin.ModelAdmin):
     coverage_badge.short_description = 'Покрытие'
 
 
-@admin.register(TestCaseVersion, site=admin_site)
-class TestCaseVersionAdmin(admin.ModelAdmin):
-    list_display = (
-        'id', 'testcase', 'version_number', 'reason_badge', 
-        'created_by', 'created_at'
-    )
-    list_filter = ('reason', 'created_at')
-    search_fields = ('testcase__title', 'change_comment')
-    readonly_fields = ('created_at', 'preview_screenshot')
-    
-    fieldsets = (
-        ('Основная информация', {
-            'fields': ('testcase', 'version_number', 'created_by', 'created_at')
-        }),
-        ('Детали изменения', {
-            'fields': ('reason', 'change_comment', 'metadata')
-        }),
-        ('Скриншот', {
-            'fields': ('screenshot', 'preview_screenshot')
-        }),
-    )
-    
-    def reason_badge(self, obj):
-        colors = {
-            'manual': '#6c757d',
-            'auto_approved': '#0d6efd',
-            'design_change': '#28a745',
-            'bug_fix': '#ffc107',
-            'initial': '#17a2b8',
-        }
-        return format_html(
-            '<span style="background-color: {}; color: white; padding: 3px 10px; border-radius: 3px;">{}</span>',
-            colors.get(obj.reason, '#6c757d'),
-            obj.get_reason_display()
+# Регистрируем модели версионирования только если они доступны
+if VERSIONING_AVAILABLE and TestCaseVersion:
+    @admin.register(TestCaseVersion, site=admin_site)
+    class TestCaseVersionAdmin(admin.ModelAdmin):
+        list_display = (
+            'id', 'testcase', 'version_number', 'reason', 
+            'created_by', 'created_at'
         )
-    reason_badge.short_description = 'Причина'
-    
-    def preview_screenshot(self, obj):
-        if obj.screenshot:
-            return format_html(
-                '<img src="{}" style="max-width: 300px; max-height: 300px;"/>',
-                obj.screenshot.url
-            )
-        return "No screenshot"
-    preview_screenshot.short_description = 'Предпросмотр'
+        list_filter = ('reason', 'created_at')
+        search_fields = ('testcase__title', 'change_comment')
+        readonly_fields = ('created_at', 'preview_screenshot')
+        
+        def preview_screenshot(self, obj):
+            if obj.screenshot:
+                return format_html(
+                    '<img src="{}" style="max-width: 300px; max-height: 300px;"/>',
+                    obj.screenshot.url
+                )
+            return "No screenshot"
+        preview_screenshot.short_description = 'Предпросмотр'
 
 
-@admin.register(ReferenceUpdateRequest, site=admin_site)
-class ReferenceUpdateRequestAdmin(admin.ModelAdmin):
-    list_display = (
-        'id', 'testcase', 'status_badge', 'requested_by', 
-        'reviewed_by', 'created_at'
-    )
-    list_filter = ('status', 'created_at')
-    search_fields = ('testcase__title', 'justification', 'review_comment')
-    readonly_fields = ('created_at', 'reviewed_at', 'preview_screenshot')
-    actions = ['approve_requests', 'reject_requests']
-    
-    fieldsets = (
-        ('Основная информация', {
-            'fields': ('testcase', 'source_run', 'status')
-        }),
-        ('Запрос', {
-            'fields': ('requested_by', 'justification', 'created_at')
-        }),
-        ('Проверка', {
-            'fields': ('reviewed_by', 'review_comment', 'reviewed_at')
-        }),
-        ('Скриншот', {
-            'fields': ('proposed_screenshot', 'preview_screenshot')
-        }),
-        ('Метрики сравнения', {
-            'fields': ('comparison_metrics',),
-            'classes': ('collapse',)
-        }),
-    )
-    
-    def status_badge(self, obj):
-        colors = {
-            'pending': '#ffc107',
-            'approved': '#28a745',
-            'rejected': '#dc3545',
-        }
-        return format_html(
-            '<span style="background-color: {}; color: white; padding: 3px 10px; border-radius: 3px;">{}</span>',
-            colors.get(obj.status, '#6c757d'),
-            obj.get_status_display()
+if VERSIONING_AVAILABLE and ReferenceUpdateRequest:
+    @admin.register(ReferenceUpdateRequest, site=admin_site)
+    class ReferenceUpdateRequestAdmin(admin.ModelAdmin):
+        list_display = (
+            'id', 'testcase', 'status', 'requested_by', 
+            'reviewed_by', 'created_at'
         )
-    status_badge.short_description = 'Статус'
-    
-    def preview_screenshot(self, obj):
-        if obj.proposed_screenshot:
-            return format_html(
-                '<img src="{}" style="max-width: 300px; max-height: 300px;"/>',
-                obj.proposed_screenshot.url
-            )
-        return "No screenshot"
-    preview_screenshot.short_description = 'Предпросмотр'
-    
-    def approve_requests(self, request, queryset):
-        from .reference_versioning import ReferenceVersioningService
+        list_filter = ('status', 'created_at')
+        search_fields = ('testcase__title', 'justification', 'review_comment')
+        readonly_fields = ('created_at', 'reviewed_at', 'preview_screenshot')
         
-        count = 0
-        for req in queryset.filter(status='pending'):
-            try:
-                ReferenceVersioningService.approve_update_request(
-                    request_id=req.id,
-                    reviewer=request.user,
-                    review_comment='Bulk approved from admin'
+        def preview_screenshot(self, obj):
+            if obj.proposed_screenshot:
+                return format_html(
+                    '<img src="{}" style="max-width: 300px; max-height: 300px;"/>',
+                    obj.proposed_screenshot.url
                 )
-                count += 1
-            except Exception as e:
-                self.message_user(request, f"Error approving request {req.id}: {e}", level='error')
-        
-        self.message_user(request, f"Successfully approved {count} request(s)")
-    approve_requests.short_description = 'Одобрить выбранные запросы'
-    
-    def reject_requests(self, request, queryset):
-        from .reference_versioning import ReferenceVersioningService
-        
-        count = 0
-        for req in queryset.filter(status='pending'):
-            try:
-                ReferenceVersioningService.reject_update_request(
-                    request_id=req.id,
-                    reviewer=request.user,
-                    review_comment='Bulk rejected from admin'
-                )
-                count += 1
-            except Exception as e:
-                self.message_user(request, f"Error rejecting request {req.id}: {e}", level='error')
-        
-        self.message_user(request, f"Successfully rejected {count} request(s)")
-    reject_requests.short_description = 'Отклонить выбранные запросы'
+            return "No screenshot"
+        preview_screenshot.short_description = 'Предпросмотр'
 
 
 # Регистрируем User admin
