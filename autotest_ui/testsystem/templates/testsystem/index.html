@@ -1,0 +1,100 @@
+{% extends 'testsystem/base.html' %}
+
+{% block title %}Дашборд - Система автоматического тестирования UI{% endblock %}
+
+{% block content %}
+<div class="stats-grid">
+    <div class="stat-card">
+        <h3>{{ testcases_count }}</h3>
+        <p>Тест-кейсов</p>
+    </div>
+    <div class="stat-card">
+        <h3>{{ runs_count }}</h3>
+        <p>Прогонов</p>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>📝 Последние тест-кейсы</h2>
+    </div>
+    {% if recent_testcases %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Название</th>
+                <th>Статус</th>
+                <th>Элементов</th>
+                <th>Создан</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for tc in recent_testcases %}
+            <tr>
+                <td>{{ tc.id }}</td>
+                <td><a href="{% url 'testcase_detail' tc.id %}">{{ tc.title }}</a></td>
+                <td><span class="badge badge-{{ tc.status }}">{{ tc.get_status_display }}</span></td>
+                <td>{{ tc.elements.count }}</td>
+                <td>{{ tc.created_at|date:"d.m.Y H:i" }}</td>
+                <td>
+                    <a href="{% url 'testcase_detail' tc.id %}" class="btn btn-secondary btn-small">Просмотр</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div style="margin-top: 15px;">
+        <a href="{% url 'testcases_list' %}" class="btn">Все тест-кейсы →</a>
+    </div>
+    {% else %}
+    <p style="color: #666;">Нет тест-кейсов. <a href="{% url 'testcases_list' %}">Создайте первый</a></p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>🚀 Последние прогоны</h2>
+    </div>
+    {% if recent_runs %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Тест-кейс</th>
+                <th>Статус</th>
+                <th>Покрытие</th>
+                <th>Создан</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for run in recent_runs %}
+            <tr>
+                <td>{{ run.id }}</td>
+                <td><a href="{% url 'testcase_detail' run.testcase.id %}">{{ run.testcase.title }}</a></td>
+                <td><span class="badge badge-{{ run.status }}">{{ run.get_status_display }}</span></td>
+                <td>
+                    {% if run.coverage is not None %}
+                        {{ run.coverage|floatformat:1 }}%
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td>{{ run.started_at|date:"d.m.Y H:i" }}</td>
+                <td>
+                    <a href="{% url 'run_detail' run.id %}" class="btn btn-secondary btn-small">Просмотр</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div style="margin-top: 15px;">
+        <a href="{% url 'runs_list' %}" class="btn">Все прогоны →</a>
+    </div>
+    {% else %}
+    <p style="color: #666;">Нет прогонов. <a href="{% url 'runs_list' %}">Создайте первый</a></p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,374 @@
+{% extends 'testsystem/base.html' %}
+
+{% block title %}Тест-кейс: {{ testcase.title }} - Система автоматического тестирования UI{% endblock %}
+
+{% block content %}
+<div class="card">
+    <style>
+        .elements-viewer {
+            position: relative;
+            width: 100%;
+            border-radius: 12px;
+            overflow: auto;
+            box-shadow: 0 12px 35px rgba(0, 0, 0, 0.15);
+            margin-bottom: 25px;
+            max-height: 80vh;
+        }
+        .elements-viewer img {
+            width: 100%;
+            max-height: 80vh;
+            object-fit: contain;
+            display: block;
+        }
+        .element-box {
+            position: absolute;
+            border: 2px solid rgba(255, 255, 255, 0.9);
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.5);
+            border-radius: 6px;
+            pointer-events: auto;
+            cursor: pointer;
+            transition: box-shadow 0.2s, transform 0.2s;
+        }
+        .element-box::after {
+            content: attr(data-label);
+            position: absolute;
+            left: 0;
+            top: 0;
+            transform: translateY(-100%);
+            background: rgba(10, 10, 10, 0.75);
+            color: #fff;
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 4px 4px 0 0;
+            white-space: nowrap;
+        }
+        .element-box.active {
+            box-shadow: 0 0 0 3px #ff9f43;
+            transform: scale(1.02);
+            z-index: 5;
+        }
+        .elements-table tr.element-row.active {
+            background: rgba(255, 159, 67, 0.12);
+        }
+        .element-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .chip-button { background: #d1f7c4; color: #1b5e20; }
+        .chip-input { background: #cfe2ff; color: #0a58ca; }
+        .chip-label { background: #fde2e4; color: #b3163a; }
+        .chip-image { background: #fff3cd; color: #a07900; }
+        .chip-link { background: #f3e8ff; color: #5c2d91; }
+        .chip-unknown { background: #e2e3e5; color: #343a40; }
+        .elements-viewer-hint {
+            color: #666;
+            font-size: 14px;
+            margin-top: -10px;
+            margin-bottom: 25px;
+        }
+    </style>
+    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <h2>Тест-кейс: {{ testcase.title }}</h2>
+        <div style="display: flex; gap: 10px;">
+            <a href="{% url 'testcases_list' %}" class="btn btn-secondary">← Назад к списку</a>
+            <form method="post" action="{% url 'delete_testcase' testcase.id %}" style="display: inline;" onsubmit="return confirm('Вы уверены, что хотите удалить тест-кейс \"{{ testcase.title }}\"? Это действие нельзя отменить!');">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-danger">🗑️ Удалить тест-кейс</button>
+            </form>
+        </div>
+    </div>
+    
+    <div style="margin-bottom: 30px;">
+        <p><strong>ID:</strong> {{ testcase.id }}</p>
+        <p><strong>Статус:</strong> <span class="badge badge-{{ testcase.status }}">{{ testcase.get_status_display }}</span></p>
+        <p><strong>Описание:</strong> {{ testcase.description|default:"-" }}</p>
+        <p><strong>Создан:</strong> {{ testcase.created_at|date:"d.m.Y H:i" }}</p>
+        {% if testcase.created_by %}
+        <p><strong>Создал:</strong> {{ testcase.created_by.username }}</p>
+        {% endif %}
+    </div>
+    
+    {% if testcase.reference_screenshot %}
+    <div style="margin-bottom: 30px;">
+        <h3 style="margin-bottom: 15px;">Эталонный скриншот</h3>
+        {% if not ocr_ready %}
+        <div style="margin-bottom:15px; padding:12px; border-radius:8px; background:#fff3cd; border-left:4px solid #ffc107;">
+            <strong>OCR отключен.</strong> Установите tesseract и добавьте его в PATH, чтобы распознавать текст элементов.
+        </div>
+        {% endif %}
+        <img src="{{ testcase.reference_screenshot.url }}" alt="Reference screenshot" style="max-width: 100%; max-height: 80vh; object-fit: contain; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); margin-bottom: 20px;">
+        
+        {% if elements %}
+        <h4 style="margin-bottom: 10px;">Интерактивная карта UI</h4>
+        <div class="elements-viewer" id="elements-viewer">
+            <img src="{{ testcase.reference_screenshot.url }}" alt="Reference screenshot interactive">
+            {% for elem in elements %}
+            <div
+                class="element-box element-{{ elem.element_type|default:'unknown' }}"
+                data-element-id="{{ elem.id }}"
+                data-label="{{ elem.text|default:elem.name|default:elem.element_type|default:'element' }}"
+                style="
+                    left: {% widthratio elem.bbox.x 1 100 %}%;
+                    top: {% widthratio elem.bbox.y 1 100 %}%;
+                    width: {% widthratio elem.bbox.w 1 100 %}%;
+                    height: {% widthratio elem.bbox.h 1 100 %}%;
+                "
+                title="{{ elem.name|default:'Без названия' }} ({{ elem.element_type|default:'unknown' }})"
+            ></div>
+            {% endfor %}
+        </div>
+        <p class="elements-viewer-hint">Нажмите на элемент в таблице или на рамку, чтобы подсветить соответствующую область.</p>
+        {% endif %}
+    </div>
+    {% endif %}
+    
+    <div style="margin-bottom: 30px;">
+        {% if testcase.status == 'new' or testcase.status == 'analyzed' %}
+        <form method="post" action="{% url 'analyze_testcase' testcase.id %}" id="analyze-form">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-info">🔍 {% if testcase.status == 'new' %}Запустить{% else %}Перезапустить{% endif %} анализ макета</button>
+        </form>
+        <p style="color: #666; margin-top: 10px;">Анализ найдет все элементы UI на скриншоте и классифицирует их. Подождите несколько секунд после нажатия.</p>
+        {% if testcase.status == 'analyzed' and elements.count == 0 %}
+        <div style="margin-top: 15px; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
+            <p style="color: #856404; margin: 0;"><strong>⚠️ Элементы не найдены.</strong></p>
+            <p style="color: #856404; margin: 10px 0 0 0;">Попробуйте:</p>
+            <ul style="color: #856404; margin: 10px 0 0 20px;">
+                <li>Перезапустить анализ (кнопка выше)</li>
+                <li>Проверить, что скриншот не пустой</li>
+                <li>Убедиться, что Celery запущен</li>
+                <li>Попробовать другой скриншот</li>
+            </ul>
+        </div>
+        {% endif %}
+        {% else %}
+        <p style="color: #666;">Статус: {{ testcase.get_status_display }}</p>
+        {% endif %}
+    </div>
+    
+    <div style="margin-bottom: 30px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <h3 style="margin: 0;">Найденные элементы UI ({{ elements.count }})</h3>
+            {% if elements %}
+            <div style="display: flex; gap: 10px;">
+                <button type="button" onclick="selectAll()" class="btn btn-secondary btn-small">Выбрать все</button>
+                <button type="button" onclick="deselectAll()" class="btn btn-secondary btn-small">Снять выбор</button>
+                <button type="button" onclick="saveApprovedElements()" class="btn btn-primary btn-small">💾 Сохранить отмеченные</button>
+            </div>
+            {% endif %}
+        </div>
+        {% if elements %}
+        <div style="margin-bottom: 15px; padding: 12px; background: #e7f3ff; border-radius: 8px; border-left: 4px solid #2196F3;">
+            <p style="margin: 0; color: #0d47a1;">
+                <strong>💡 Подсказка:</strong> Отметьте элементы, с которыми вы согласны. Остальные будут переклассифицированы, 
+                а данные будут использованы для улучшения модели.
+            </p>
+        </div>
+        <table class="table elements-table">
+            <thead>
+                <tr>
+                    <th style="width: 40px;">
+                        <input type="checkbox" id="select-all-checkbox" onchange="toggleAll(this)">
+                    </th>
+                    <th>ID</th>
+                    <th>Тип</th>
+                    <th>Название</th>
+                    <th>Распознанный текст</th>
+                    <th>Размер</th>
+                    <th>Уверенность</th>
+                    <th>Координаты</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for elem in elements %}
+                <tr class="element-row" data-element-id="{{ elem.id }}">
+                    <td>
+                        <input type="checkbox" class="element-checkbox" data-element-id="{{ elem.id }}" 
+                               checked>
+                    </td>
+                    <td>#{{ elem.id }}</td>
+                    <td>
+                        {% with elem.element_type|default:"unknown" as type %}
+                        <span class="element-chip chip-{{ type }}">
+                            {% if type == 'button' %}🔘{% elif type == 'input' %}⌨️{% elif type == 'label' %}🔖{% elif type == 'image' %}🖼️{% elif type == 'link' %}🔗{% else %}❔{% endif %}
+                            {{ type }}
+                        </span>
+                        {% endwith %}
+                    </td>
+                    <td><strong>{{ elem.name|default:"Без названия" }}</strong></td>
+                    <td>{{ elem.text|default:"—" }}</td>
+                    <td>{{ elem.bbox.w|floatformat:2 }} × {{ elem.bbox.h|floatformat:2 }}</td>
+                    <td>{{ elem.confidence|floatformat:2 }}</td>
+                    <td style="font-size: 12px;">
+                        x:{{ elem.bbox.x|floatformat:2 }}, y:{{ elem.bbox.y|floatformat:2 }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color: #666;">Элементы не найдены. Запустите анализ тест-кейса.</p>
+        {% endif %}
+    </div>
+    
+    <div>
+        <h3 style="margin-bottom: 15px;">Прогоны для этого тест-кейса ({{ runs.count }})</h3>
+        {% if runs %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Статус</th>
+                    <th>Покрытие</th>
+                    <th>Дефектов</th>
+                    <th>Создан</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for run in runs %}
+                <tr>
+                    <td>{{ run.id }}</td>
+                    <td><span class="badge badge-{{ run.status }}">{{ run.get_status_display }}</span></td>
+                    <td>
+                        {% if run.coverage is not None %}
+                            {{ run.coverage|floatformat:1 }}%
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>{{ run.defects.count }}</td>
+                    <td>{{ run.started_at|date:"d.m.Y H:i" }}</td>
+                    <td>
+                        <a href="{% url 'run_detail' run.id %}" class="btn btn-secondary btn-small">Просмотр</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color: #666;">Нет прогонов для этого тест-кейса.</p>
+        {% endif %}
+    </div>
+</div>
+<script>
+    (function() {
+        const rows = document.querySelectorAll('.elements-table .element-row');
+        const boxes = document.querySelectorAll('.elements-viewer .element-box');
+
+        if (!rows.length || !boxes.length) {
+            return;
+        }
+
+        const boxMap = {};
+        boxes.forEach(box => {
+            boxMap[box.dataset.elementId] = box;
+        });
+
+        function setActive(elementId) {
+            rows.forEach(r => r.classList.toggle('active', r.dataset.elementId === elementId));
+            boxes.forEach(b => b.classList.toggle('active', b.dataset.elementId === elementId));
+        }
+
+        rows.forEach(row => {
+            row.addEventListener('click', (e) => {
+                // Не активируем при клике на чекбокс
+                if (e.target.type === 'checkbox') {
+                    return;
+                }
+                const id = row.dataset.elementId;
+                setActive(id);
+                const targetBox = boxMap[id];
+                if (targetBox) {
+                    targetBox.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                }
+            });
+        });
+
+        boxes.forEach(box => {
+            box.addEventListener('click', (event) => {
+                event.stopPropagation();
+                setActive(box.dataset.elementId);
+            });
+        });
+    })();
+
+    function toggleAll(checkbox) {
+        const checkboxes = document.querySelectorAll('.element-checkbox');
+        checkboxes.forEach(cb => cb.checked = checkbox.checked);
+    }
+
+    function selectAll() {
+        document.querySelectorAll('.element-checkbox').forEach(cb => cb.checked = true);
+        document.getElementById('select-all-checkbox').checked = true;
+    }
+
+    function deselectAll() {
+        document.querySelectorAll('.element-checkbox').forEach(cb => cb.checked = false);
+        document.getElementById('select-all-checkbox').checked = false;
+    }
+
+    async function saveApprovedElements() {
+        const checkboxes = document.querySelectorAll('.element-checkbox:checked');
+        const approvedIds = Array.from(checkboxes).map(cb => parseInt(cb.dataset.elementId));
+        
+        if (approvedIds.length === 0) {
+            alert('Выберите хотя бы один элемент для сохранения');
+            return;
+        }
+
+        const testcaseId = {{ testcase.id }};
+        // Получаем CSRF токен из cookie или формы
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+        const csrfToken = getCookie('csrftoken') || document.querySelector('#analyze-form [name=csrfmiddlewaretoken]')?.value || '';
+
+        try {
+            const response = await fetch(`/testcase/${testcaseId}/approve-elements/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify({
+                    approved_element_ids: approvedIds
+                })
+            });
+
+            const data = await response.json();
+            
+            if (response.ok) {
+                alert(`✓ Сохранено ${approvedIds.length} элементов. ${data.reclassified || 0} элементов переклассифицировано.`);
+                if (data.retrain_available) {
+                    if (confirm('Достаточно данных для дообучения модели. Запустить дообучение?')) {
+                        window.location.reload();
+                    }
+                } else {
+                    window.location.reload();
+                }
+            } else {
+                alert('Ошибка: ' + (data.error || 'Не удалось сохранить'));
+            }
+        } catch (error) {
+            alert('Ошибка при сохранении: ' + error.message);
+        }
+    }
+</script>
+{% endblock %}

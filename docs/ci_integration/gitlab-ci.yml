@@ -1,0 +1,80 @@
+# Пример GitLab CI конфигурации для интеграции с системой тестирования UI
+# Добавьте в .gitlab-ci.yml вашего проекта
+
+stages:
+  - test
+  - ui-tests
+
+variables:
+  TEST_API_URL: "http://your-test-api.com/api"
+  TEST_API_TOKEN: "${TEST_API_TOKEN}"  # Добавьте в GitLab CI/CD Variables
+
+ui-visual-tests:
+  stage: ui-tests
+  image: python:3.12
+  
+  before_script:
+    - pip install selenium requests pillow
+    
+  script:
+    # Запуск UI тестов
+    - python scripts/run_ui_tests.py
+    
+    # Загрузка скриншотов
+    - |
+      python scripts/upload_screenshots.py \
+        --api-url "$TEST_API_URL" \
+        --token "$TEST_API_TOKEN" \
+        --testcase-id 1 \
+        --screenshots-dir ./screenshots
+    
+    # Отправка webhook
+    - |
+      curl -X POST "$TEST_API_URL/webhooks/ci/gitlab/?testcase_id=1" \
+        -H "Content-Type: application/json" \
+        -H "X-Gitlab-Token: ${GITLAB_WEBHOOK_TOKEN}" \
+        -d '{
+          "object_kind": "pipeline",
+          "object_attributes": {
+            "id": ${CI_PIPELINE_ID},
+            "status": "running",
+            "ref": "${CI_COMMIT_REF_NAME}",
+            "sha": "${CI_COMMIT_SHA}",
+            "web_url": "${CI_PIPELINE_URL}"
+          },
+          "project": {
+            "name": "${CI_PROJECT_NAME}",
+            "path_with_namespace": "${CI_PROJECT_PATH}"
+          },
+          "builds": [
+            {
+              "id": ${CI_JOB_ID},
+              "name": "ui-visual-tests",
+              "status": "running"
+            }
+          ]
+        }'
+    
+    # Ожидание результатов
+    - python scripts/wait_for_results.py \
+        --api-url "$TEST_API_URL" \
+        --ci-job-id "${CI_PIPELINE_ID}" \
+        --timeout 300
+    
+    # Получение результатов
+    - python scripts/get_test_results.py \
+        --api-url "$TEST_API_URL" \
+        --ci-job-id "${CI_PIPELINE_ID}"
+  
+  artifacts:
+    when: always
+    paths:
+      - screenshots/
+      - test-results.json
+    expire_in: 1 week
+  
+  only:
+    - main
+    - develop
+    - merge_requests
+

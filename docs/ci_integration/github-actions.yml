@@ -1,0 +1,96 @@
+# Пример GitHub Actions workflow для интеграции с системой тестирования UI
+# Сохраните как .github/workflows/ui-tests.yml
+
+name: UI Visual Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Позволяет запускать вручную
+
+jobs:
+  ui-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+    
+    - name: Install dependencies
+      run: |
+        pip install selenium requests pillow
+    
+    - name: Run UI tests and capture screenshots
+      env:
+        TEST_API_URL: ${{ secrets.TEST_API_URL || 'http://localhost:8000/api' }}
+        TEST_API_TOKEN: ${{ secrets.TEST_API_TOKEN }}
+      run: |
+        # Здесь ваш скрипт для запуска Selenium тестов
+        # Пример:
+        python scripts/run_ui_tests.py
+    
+    - name: Upload screenshots
+      if: always()
+      run: |
+        # Загружаем скриншоты в систему тестирования через API
+        python scripts/upload_screenshots.py \
+          --api-url "$TEST_API_URL" \
+          --token "$TEST_API_TOKEN" \
+          --testcase-id 1 \
+          --screenshots-dir ./screenshots
+    
+    - name: Trigger webhook
+      if: always()
+      env:
+        WEBHOOK_URL: ${{ secrets.WEBHOOK_URL || 'http://localhost:8000/api/webhooks/ci/github/' }}
+        TESTCASE_ID: ${{ secrets.TESTCASE_ID || '1' }}
+      run: |
+        curl -X POST "$WEBHOOK_URL?testcase_id=$TESTCASE_ID" \
+          -H "Content-Type: application/json" \
+          -H "X-GitHub-Event: workflow_run" \
+          -d '{
+            "action": "workflow_run",
+            "workflow_run": {
+              "id": "${{ github.run_id }}",
+              "name": "UI Visual Tests",
+              "status": "${{ job.status }}",
+              "conclusion": "${{ job.status }}",
+              "head_branch": "${{ github.ref_name }}",
+              "head_sha": "${{ github.sha }}",
+              "html_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            },
+            "repository": {
+              "name": "${{ github.repository }}",
+              "full_name": "${{ github.repository }}"
+            }
+          }'
+    
+    - name: Wait for test results
+      run: |
+        # Ожидаем результатов тестирования
+        python scripts/wait_for_results.py \
+          --api-url "$TEST_API_URL" \
+          --ci-job-id "${{ github.run_id }}" \
+          --timeout 300
+    
+    - name: Get test results
+      if: always()
+      run: |
+        # Получаем результаты и выводим статус
+        python scripts/get_test_results.py \
+          --api-url "$TEST_API_URL" \
+          --ci-job-id "${{ github.run_id }}"
+    
+    - name: Fail if tests failed
+      if: failure()
+      run: |
+        echo "UI tests failed!"
+        exit 1
+

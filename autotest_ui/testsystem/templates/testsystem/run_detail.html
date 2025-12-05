@@ -1,0 +1,259 @@
+{% extends 'testsystem/base.html' %}
+
+{% block title %}Прогон #{{ run.id }} - Система автоматического тестирования UI{% endblock %}
+
+{% block content %}
+<div class="card">
+    <style>
+        .issue-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 12px;
+            margin: 20px 0;
+        }
+        .issue-summary .metric {
+            padding: 15px;
+            border-radius: 12px;
+            background: #f8f9ff;
+            border: 1px solid #e0e7ff;
+        }
+        .issue-summary .metric h4 {
+            margin: 0;
+            font-size: 28px;
+            color: #4f46e5;
+        }
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+        .comparison-grid img {
+            width: 100%;
+            border-radius: 10px;
+            box-shadow: 0 8px 25px rgba(15, 23, 42, 0.15);
+        }
+        .issue-table tbody tr.problem-missing { background: rgba(220, 53, 69, 0.08); }
+        .issue-table tbody tr.problem-shifted { background: rgba(255, 193, 7, 0.12); }
+        .badge-missing { background: #dc3545; }
+        .badge-shifted { background: #fd7e14; }
+        .badge-ok { background: #28a745; }
+    </style>
+    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <h2>Прогон #{{ run.id }}</h2>
+        <div style="display: flex; gap: 10px;">
+            <a href="{% url 'runs_list' %}" class="btn btn-secondary">← Назад к списку</a>
+            <form method="post" action="{% url 'delete_run' run.id %}" style="display: inline;" onsubmit="return confirm('Вы уверены, что хотите удалить прогон #{{ run.id }}? Это действие нельзя отменить!');">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-danger">🗑️ Удалить прогон</button>
+            </form>
+        </div>
+    </div>
+    
+    <div style="margin-bottom: 30px;">
+        <p><strong>Тест-кейс:</strong> <a href="{% url 'testcase_detail' run.testcase.id %}">{{ run.testcase.title }}</a></p>
+        <p><strong>Статус:</strong> <span class="badge badge-{{ run.status }}">{{ run.get_status_display }}</span></p>
+        <p><strong>Покрытие:</strong> 
+            {% if run.coverage is not None %}
+                <strong style="color: {% if run.coverage >= 90 %}#28a745{% elif run.coverage >= 70 %}#ffc107{% else %}#dc3545{% endif %};">
+                    {{ run.coverage|floatformat:1 }}%
+                </strong>
+            {% else %}
+                -
+            {% endif %}
+        </p>
+        <p><strong>SSIM:</strong> {{ run.reference_diff_score|default:"-"|floatformat:3 }}</p>
+        <p><strong>Создан:</strong> {{ run.started_at|date:"d.m.Y H:i" }}</p>
+        {% if run.finished_at %}
+        <p><strong>Завершен:</strong> {{ run.finished_at|date:"d.m.Y H:i" }}</p>
+        {% endif %}
+        {% if run.started_by %}
+        <p><strong>Запустил:</strong> {{ run.started_by.username }}</p>
+        {% endif %}
+        {% if run.task_tracker_issue %}
+        <div style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);">
+            <p style="color: white; margin: 0 0 10px 0; font-weight: 600; font-size: 1.1em;">🔗 Задача в Jira создана</p>
+            {% if jira_issue_url %}
+                <a href="{{ jira_issue_url }}" target="_blank" 
+                   style="display: inline-block; padding: 12px 24px; background: white; color: #667eea; text-decoration: none; border-radius: 6px; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: transform 0.2s;"
+                   onmouseover="this.style.transform='translateY(-2px)'" 
+                   onmouseout="this.style.transform='translateY(0)'">
+                    {{ run.task_tracker_issue }} → Открыть в Jira ↗️
+                </a>
+            {% else %}
+                <span style="color: white; font-weight: 600;">{{ run.task_tracker_issue }}</span>
+            {% endif %}
+            <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 0.9em;">Задача создана автоматически при обнаружении дефекта</p>
+        </div>
+        {% endif %}
+        {% if run.error_message %}
+        <div style="margin-top: 15px; padding: 15px; background: #f8d7da; border-radius: 8px; border-left: 4px solid #dc3545;">
+            <p style="margin: 0; color: #721c24;"><strong>Ошибка сравнения:</strong> {{ run.error_message }}</p>
+        </div>
+        {% endif %}
+    </div>
+    
+    {% if run.status == 'queued' or run.status == 'processing' %}
+    <div style="margin-bottom: 30px; padding: 20px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
+        <form method="post" action="{% url 'compare_run' run.id %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-info">⚡ Запустить сравнение</button>
+        </form>
+        <p style="color: #666; margin-top: 10px;">Сравнение найдет различия между эталоном и текущим скриншотом</p>
+    </div>
+    {% endif %}
+    
+    {% if comparison_report %}
+    <div style="margin-bottom: 30px;">
+        <h3 style="margin-bottom: 15px;">Скриншоты для сравнения</h3>
+        <div class="comparison-grid">
+            <div>
+                <h5>Эталон</h5>
+                <img src="{{ comparison_report.reference_url|default:run.testcase.reference_screenshot.url }}" alt="Reference screenshot">
+            </div>
+            <div>
+                <h5>Текущий</h5>
+                <img src="{{ comparison_report.actual_url|default:run.actual_screenshot.url }}" alt="Actual screenshot">
+            </div>
+        </div>
+    </div>
+    {% elif run.actual_screenshot %}
+    <div style="margin-bottom: 30px;">
+        <h3 style="margin-bottom: 15px;">Текущий скриншот</h3>
+        <img src="{{ run.actual_screenshot.url }}" alt="Actual screenshot" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+    </div>
+    {% endif %}
+    
+    {% if comparison_report %}
+    <div class="visualization" style="margin-bottom: 30px;">
+        <h3 style="margin-bottom: 15px;">📊 Отчет сравнения</h3>
+
+        {% with stats=comparison_report.analysis.stats %}
+        <div class="issue-summary">
+            <div class="metric">
+                <small style="color:#999;">Отсутствует</small>
+                <h4>{{ stats.missing }}</h4>
+            </div>
+            <div class="metric">
+                <small style="color:#999;">Смещено / изменено</small>
+                <h4 style="color:#fd7e14;">{{ stats.shifted }}</h4>
+            </div>
+            <div class="metric">
+                <small style="color:#999;">Совпало</small>
+                <h4 style="color:#28a745;">{{ stats.ok }}</h4>
+            </div>
+            <div class="metric">
+                <small style="color:#999;">SSIM</small>
+                <h4 style="color:#0d6efd;">{{ comparison_report.ssim_score|floatformat:3 }}</h4>
+            </div>
+        </div>
+        {% endwith %}
+        
+        <h4 style="margin-bottom: 15px;">Визуализация различий</h4>
+        <p style="color: #666; margin-bottom: 15px;">
+            Красные рамки — элементы, которых нет на актуальном скриншоте.<br>
+            Оранжевые рамки — элементы, которые изменили положение или состояние.
+        </p>
+        <img src="{{ comparison_report.visualization_url }}" alt="Comparison visualization" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+
+        <h4 style="margin: 25px 0 10px;">Проблемные элементы</h4>
+        <table class="table issue-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Тип</th>
+                    <th>Название</th>
+                    <th>Текст</th>
+                    <th>Статус</th>
+                    <th>Δ, %</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% with comparison_report.analysis.elements as issues %}
+                {% for issue in issues %}
+                    {% if issue.status != 'ok' %}
+                    <tr class="problem-{{ issue.status }}">
+                        <td>#{{ issue.id }}</td>
+                        <td>{{ issue.type }}</td>
+                        <td>{{ issue.name|default:"Без названия" }}</td>
+                        <td>{{ issue.text|default:"—" }}</td>
+                        <td>
+                            <span class="badge badge-{{ issue.status }}">
+                                {% if issue.status == 'missing' %}Нет на экране{% else %}Смещен{% endif %}
+                            </span>
+                        </td>
+                        <td>{{ issue.diff_percent|floatformat:0 }}%</td>
+                    </tr>
+                    {% endif %}
+                {% empty %}
+                <tr>
+                    <td colspan="5" style="color:#28a745;">Все элементы совпали с эталоном.</td>
+                </tr>
+                {% endfor %}
+                {% endwith %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
+    {% if coverage_metric %}
+    <div style="margin-bottom: 30px;">
+        <h3 style="margin-bottom: 15px;">📈 Метрики покрытия</h3>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+            <div style="padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                <strong>Всего элементов:</strong><br>
+                <span style="font-size: 1.5em; color: #667eea;">{{ coverage_metric.total_elements }}</span>
+            </div>
+            <div style="padding: 15px; background: #d4edda; border-radius: 8px;">
+                <strong>Совпало:</strong><br>
+                <span style="font-size: 1.5em; color: #28a745;">{{ coverage_metric.matched_elements }}</span>
+            </div>
+            <div style="padding: 15px; background: #f8d7da; border-radius: 8px;">
+                <strong>Не совпало:</strong><br>
+                <span style="font-size: 1.5em; color: #dc3545;">{{ coverage_metric.mismatched_elements }}</span>
+            </div>
+            <div style="padding: 15px; background: #fff3cd; border-radius: 8px;">
+                <strong>Покрытие:</strong><br>
+                <span style="font-size: 1.5em; color: #ffc107;">{{ coverage_metric.coverage_percent|floatformat:2 }}%</span>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    
+    {% if defects %}
+    <div>
+        <h3 style="margin-bottom: 15px;">🐛 Обнаруженные дефекты ({{ defects.count }})</h3>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Серьезность</th>
+                    <th>Описание</th>
+                    <th>Элемент</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for defect in defects %}
+                <tr>
+                    <td>{{ defect.id }}</td>
+                    <td>
+                        <span class="badge {% if defect.severity == 'critical' %}badge-failed{% elif defect.severity == 'major' %}badge-processing{% else %}badge-queued{% endif %}">
+                            {{ defect.get_severity_display }}
+                        </span>
+                    </td>
+                    <td>{{ defect.description }}</td>
+                    <td>
+                        {% if defect.element %}
+                            {{ defect.element.element_type|default:"unknown" }} #{{ defect.element.id }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
