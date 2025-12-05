@@ -1,0 +1,165 @@
+{% extends 'testsystem/base.html' %}
+{% load static %}
+
+{% block title %}CI/CD Dashboard{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12">
+            <h1 class="mb-4">
+                <i class="bi bi-diagram-3"></i> CI/CD Dashboard
+            </h1>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-body">
+                    <form method="get" class="row g-3">
+                        <div class="col-md-4">
+                            <label for="days" class="form-label">Период</label>
+                            <select name="days" id="days" class="form-select" onchange="this.form.submit()">
+                                <option value="7" {% if days == 7 %}selected{% endif %}>7 дней</option>
+                                <option value="14" {% if days == 14 %}selected{% endif %}>14 дней</option>
+                                <option value="30" {% if days == 30 %}selected{% endif %}>30 дней</option>
+                                <option value="90" {% if days == 90 %}selected{% endif %}>90 дней</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="status" class="form-label">Статус</label>
+                            <select name="status" id="status" class="form-select" onchange="this.form.submit()">
+                                <option value="" {% if not selected_status %}selected{% endif %}>Все</option>
+                                <option value="finished" {% if selected_status == 'finished' %}selected{% endif %}>Завершёно</option>
+                                <option value="failed" {% if selected_status == 'failed' %}selected{% endif %}>Ошибка</option>
+                                <option value="processing" {% if selected_status == 'processing' %}selected{% endif %}>В процессе</option>
+                            </select>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Overall Stats -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h5 class="card-title">Всего сборок</h5>
+                    <h2 class="text-primary">{{ total_jobs }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h5 class="card-title">Всего прогонов</h5>
+                    <h2 class="text-info">{{ total_runs }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h5 class="card-title">Успешно</h5>
+                    <h2 class="text-success">{{ finished_runs }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h5 class="card-title">Success Rate</h5>
+                    <h2 class="{% if success_rate >= 80 %}text-success{% elif success_rate >= 50 %}text-warning{% else %}text-danger{% endif %}">
+                        {{ success_rate }}%
+                    </h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CI Jobs Table -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">CI/CD Сборки</h5>
+                </div>
+                <div class="card-body">
+                    {% if ci_jobs %}
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Job ID</th>
+                                    <th>Всего прогонов</th>
+                                    <th>Успешно</th>
+                                    <th>Ошибки</th>
+                                    <th>В процессе</th>
+                                    <th>Ср. покрытие</th>
+                                    <th>Дефекты</th>
+                                    <th>Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for job in ci_jobs %}
+                                <tr>
+                                    <td>
+                                        <code>{{ job.ci_job_id }}</code>
+                                    </td>
+                                    <td>{{ job.total_runs }}</td>
+                                    <td>
+                                        <span class="badge bg-success">{{ job.finished_runs }}</span>
+                                    </td>
+                                    <td>
+                                        {% if job.failed_runs > 0 %}
+                                        <span class="badge bg-danger">{{ job.failed_runs }}</span>
+                                        {% else %}
+                                        <span class="text-muted">0</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if job.processing_runs > 0 %}
+                                        <span class="badge bg-info">{{ job.processing_runs }}</span>
+                                        {% else %}
+                                        <span class="text-muted">0</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if job.avg_coverage %}
+                                        {{ job.avg_coverage|floatformat:1 }}%
+                                        {% else %}
+                                        <span class="text-muted">N/A</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if job.defect_count > 0 %}
+                                        <span class="badge bg-warning text-dark">{{ job.defect_count }}</span>
+                                        {% else %}
+                                        <span class="text-muted">0</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <a href="{% url 'cicd_job_detail' job.ci_job_id %}" class="btn btn-sm btn-primary">
+                                            <i class="bi bi-eye"></i> Подробнее
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> Нет CI/CD сборок за выбранный период.
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
