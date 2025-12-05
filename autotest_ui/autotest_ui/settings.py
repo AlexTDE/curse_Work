@@ -114,6 +114,9 @@ AUTH_PASSWORD_VALIDATORS = [
     },
     {
         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        'OPTIONS': {
+            'min_length': 8,  # Минимум 8 символов
+        }
     },
     {
         'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
@@ -121,6 +124,23 @@ AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
+]
+
+# Password Hashing - Secure algorithms
+# https://docs.djangoproject.com/en/5.2/topics/auth/passwords/
+PASSWORD_HASHERS = [
+    # Argon2 - самый современный и безопасный (рекомендация OWASP 2024)
+    'django.contrib.auth.hashers.Argon2PasswordHasher',
+    
+    # PBKDF2 с SHA256 - стандарт Django (для совместимости)
+    'django.contrib.auth.hashers.PBKDF2PasswordHasher',
+    'django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher',
+    
+    # BCrypt - альтернативный безопасный алгоритм
+    # 'django.contrib.auth.hashers.BCryptSHA256PasswordHasher',
+    
+    # Устаревшие хешеры для миграции старых паролей (не используйте для новых!)
+    # 'django.contrib.auth.hashers.ScryptPasswordHasher',
 ]
 
 
