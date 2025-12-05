@@ -16,60 +16,86 @@ from .tasks import compare_reference_with_actual, generate_test_from_screenshot
 from .ci_integration.utils import get_ci_status_summary
 
 
-class TestCaseViewSet(viewsets.ModelViewSet):
-    queryset = TestCase.objects.all().order_by('-created_at')
-    serializer_class = TestCaseSerializer
-    permission_classes = [permissions.IsAuthenticated]
+class IsOwnerOrAdmin(permissions.BasePermission):
+    """
+    Кастомное разрешение:
+    - Администраторы (is_superuser или is_staff) имеют полный доступ
+    - Обычные пользователи видят только свои объекты
+    """
     
-    def get_permissions(self):
+    def has_object_permission(self, request, view, obj):
+        # Администраторы могут всё
+        if request.user.is_superuser or request.user.is_staff:
+            return True
+        
+        # Для TestCase проверяем created_by
+        if hasattr(obj, 'created_by'):
+            return obj.created_by == request.user
+        
+        # Для Run проверяем started_by или created_by тест-кейса
+        if hasattr(obj, 'started_by'):
+            if obj.started_by == request.user:
+                return True
+            if hasattr(obj, 'testcase') and obj.testcase.created_by == request.user:
+                return True
+            return False
+        
+        # По умолчанию запрещаем
+        return False
+
+
+class TestCaseViewSet(viewsets.ModelViewSet):
+    serializer_class = TestCaseSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrAdmin]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['status', 'created_by']
+    
+    def get_queryset(self):
         """
-        Переопределяем права доступа: все операции требуют авторизации.
+        Фильтрация тест-кейсов:
+        - Администраторы видят все тест-кейсы
+        - Обычные пользователи видят только свои
         """
-        # Для чтения можно разрешить неавторизованным (опционально)
-        if self.action in ['list', 'retrieve', 'elements']:
-            return [permissions.IsAuthenticatedOrReadOnly()]
-        # Для создания, изменения, удаления - только авторизованные
-            return [permissions.IsAuthenticated()]
+        user = self.request.user
+        
+        # Администраторы видят всё
+        if user.is_superuser or user.is_staff:
+            return TestCase.objects.all().order_by('-created_at')
+        
+        # Обычные пользователи видят только свои тест-кейсы
+        return TestCase.objects.filter(created_by=user).order_by('-created_at')
+    
+    def perform_create(self, serializer):
+        """
+        При создании автоматически назначаем текущего пользователя как created_by
+        """
+        serializer.save(created_by=self.request.user)
     
     def perform_destroy(self, instance):
         """
         Проверяем права доступа перед удалением.
-        Только владелец или суперпользователь может удалить тест-кейс.
+        Только владелец или администратор может удалить тест-кейс.
         """
         user = self.request.user
-        if not user.is_authenticated:
-            raise permissions.PermissionDenied("Требуется авторизация")
         
-        # Суперпользователь может удалять все
-        if user.is_superuser:
+        # Администраторы могут удалять все
+        if user.is_superuser or user.is_staff:
             super().perform_destroy(instance)
             return
         
         # Владелец может удалять свои тест-кейсы
-        if instance.created_by and instance.created_by == user:
+        if instance.created_by == user:
             super().perform_destroy(instance)
             return
         
-        # Остальные не могут удалять
         raise permissions.PermissionDenied("Вы можете удалять только свои тест-кейсы")
 
     @action(detail=True, methods=['post'])
     def analyze(self, request, pk=None):
         """
         Запуск анализа тест-кейса.
-        Только владелец или суперпользователь может запускать анализ.
         """
         testcase = self.get_object()
-        user = request.user
-        
-        # Проверка прав доступа
-        if not user.is_authenticated:
-            raise permissions.PermissionDenied("Требуется авторизация")
-        
-        if not user.is_superuser:
-            if not testcase.created_by or testcase.created_by != user:
-                raise permissions.PermissionDenied("Вы можете анализировать только свои тест-кейсы")
-        
         job = generate_test_from_screenshot.delay(testcase.id)
         return Response({'task_id': job.id, 'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
 
@@ -79,99 +105,75 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         serializer = UIElementSerializer(testcase.elements.all(), many=True)
         return Response(serializer.data)
 
-    def perform_create(self, serializer):
-        user = getattr(self.request, 'user', None)
-        if user and user.is_authenticated:
-            serializer.save(created_by=user)
-        else:
-            serializer.save()
-
 
 class RunViewSet(viewsets.ModelViewSet):
-    queryset = Run.objects.select_related('testcase', 'started_by', 'coverage_metric').prefetch_related('defects')
     serializer_class = RunSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrAdmin]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['ci_job_id', 'status', 'testcase', 'started_by']
     
-    def get_permissions(self):
+    def get_queryset(self):
         """
-        Переопределяем права доступа: все операции требуют авторизации.
+        Фильтрация прогонов:
+        - Администраторы видят все прогоны
+        - Обычные пользователи видят только свои прогоны и прогоны своих тест-кейсов
         """
-        # Для чтения можно разрешить неавторизованным (опционально)
-        if self.action in ['list', 'retrieve', 'ci_status', 'ci_status_detail']:
-            return [permissions.IsAuthenticatedOrReadOnly()]
-        # Для создания, изменения, удаления - только авторизованные
-            return [permissions.IsAuthenticated()]
+        user = self.request.user
+        queryset = Run.objects.select_related(
+            'testcase', 'started_by', 'coverage_metric'
+        ).prefetch_related('defects')
+        
+        # Администраторы видят всё
+        if user.is_superuser or user.is_staff:
+            return queryset
+        
+        # Обычные пользователи видят:
+        # 1. Прогоны, которые они сами запустили (started_by)
+        # 2. Прогоны тест-кейсов, которые они создали (testcase.created_by)
+        from django.db.models import Q
+        return queryset.filter(
+            Q(started_by=user) | Q(testcase__created_by=user)
+        ).distinct()
+    
+    def perform_create(self, serializer):
+        """
+        При создании автоматически назначаем текущего пользователя как started_by
+        """
+        if not serializer.validated_data.get('actual_screenshot'):
+            raise ValidationError({'actual_screenshot': 'Screenshot is required for a run'})
+        serializer.save(started_by=self.request.user, status='processing')
     
     def perform_destroy(self, instance):
         """
         Проверяем права доступа перед удалением.
-        Только владелец или суперпользователь может удалить прогон.
         """
         user = self.request.user
-        if not user.is_authenticated:
-            raise permissions.PermissionDenied("Требуется авторизация")
         
-        # Суперпользователь может удалять все
-        if user.is_superuser:
+        # Администраторы могут удалять все
+        if user.is_superuser or user.is_staff:
             super().perform_destroy(instance)
             return
         
-        # Владелец может удалять свои прогоны
-        if instance.started_by and instance.started_by == user:
+        # Владелец прогона может удалить
+        if instance.started_by == user:
             super().perform_destroy(instance)
             return
         
-        # Владелец тест-кейса может удалять прогоны своего тест-кейса
-        if instance.testcase.created_by and instance.testcase.created_by == user:
+        # Владелец тест-кейса может удалить прогоны своего тест-кейса
+        if instance.testcase.created_by == user:
             super().perform_destroy(instance)
             return
         
-        # Остальные не могут удалять
-        raise permissions.PermissionDenied("Вы можете удалять только свои прогоны или прогоны своих тест-кейсов")
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['ci_job_id', 'status', 'testcase']
-
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        # Фильтрация по ci_job_id через query параметр
-        ci_job_id = self.request.query_params.get('ci_job_id', None)
-        if ci_job_id:
-            queryset = queryset.filter(ci_job_id=ci_job_id)
-        return queryset
-
-    def perform_create(self, serializer):
-        user = getattr(self.request, 'user', None)
-        if not serializer.validated_data.get('actual_screenshot'):
-            raise ValidationError({'actual_screenshot': 'Screenshot is required for a run'})
-        serializer.save(started_by=user if user and user.is_authenticated else None, status='processing')
+        raise permissions.PermissionDenied(
+            "Вы можете удалять только свои прогоны или прогоны своих тест-кейсов"
+        )
 
     @action(detail=True, methods=['post'])
     def compare(self, request, pk=None):
         """
         Запуск сравнения прогона с эталоном.
-        Только владелец, владелец тест-кейса или суперпользователь может запускать сравнение.
         """
         run = self.get_object()
-        user = request.user
-        
-        # Проверка прав доступа
-        if not user.is_authenticated:
-            raise permissions.PermissionDenied("Требуется авторизация")
-        
-        if not user.is_superuser:
-            can_compare = False
-            
-            # Владелец прогона может запускать сравнение
-            if run.started_by and run.started_by == user:
-                can_compare = True
-            
-            # Владелец тест-кейса может запускать сравнение прогонов своего тест-кейса
-            if run.testcase.created_by and run.testcase.created_by == user:
-                can_compare = True
-            
-            if not can_compare:
-                raise permissions.PermissionDenied("Вы можете запускать сравнение только для своих прогонов или прогонов своих тест-кейсов")
-        
         job = compare_reference_with_actual.delay(run.id)
         run.status = 'processing'
         run.save(update_fields=['status'])
@@ -188,7 +190,9 @@ class RunViewSet(viewsets.ModelViewSet):
             )
         
         summary = get_ci_status_summary(ci_job_id)
-        runs = Run.objects.filter(ci_job_id=ci_job_id).order_by('-started_at')
+        
+        # Применяем фильтрацию по пользователю
+        runs = self.get_queryset().filter(ci_job_id=ci_job_id).order_by('-started_at')
         serializer = RunSerializer(runs, many=True)
         
         return Response({
@@ -213,18 +217,66 @@ class RunViewSet(viewsets.ModelViewSet):
 
 
 class UIElementViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = UIElement.objects.select_related('testcase').all()
     serializer_class = UIElementSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        """
+        Фильтрация UI элементов:
+        - Администраторы видят все элементы
+        - Обычные пользователи видят только элементы своих тест-кейсов
+        """
+        user = self.request.user
+        queryset = UIElement.objects.select_related('testcase').all()
+        
+        # Администраторы видят всё
+        if user.is_superuser or user.is_staff:
+            return queryset
+        
+        # Обычные пользователи видят только элементы своих тест-кейсов
+        return queryset.filter(testcase__created_by=user)
 
 
 class DefectViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Defect.objects.select_related('testcase', 'run', 'element').all()
     serializer_class = DefectSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        """
+        Фильтрация дефектов:
+        - Администраторы видят все дефекты
+        - Обычные пользователи видят только дефекты своих тест-кейсов
+        """
+        user = self.request.user
+        queryset = Defect.objects.select_related('testcase', 'run', 'element').all()
+        
+        # Администраторы видят всё
+        if user.is_superuser or user.is_staff:
+            return queryset
+        
+        # Обычные пользователи видят только дефекты своих тест-кейсов
+        return queryset.filter(testcase__created_by=user)
 
 
 class CoverageMetricViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = CoverageMetric.objects.select_related('run').all()
     serializer_class = CoverageMetricSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        """
+        Фильтрация метрик покрытия:
+        - Администраторы видят все метрики
+        - Обычные пользователи видят только метрики своих прогонов
+        """
+        user = self.request.user
+        queryset = CoverageMetric.objects.select_related('run').all()
+        
+        # Администраторы видят всё
+        if user.is_superuser or user.is_staff:
+            return queryset
+        
+        # Обычные пользователи видят метрики своих прогонов или прогонов своих тест-кейсов
+        from django.db.models import Q
+        return queryset.filter(
+            Q(run__started_by=user) | Q(run__testcase__created_by=user)
+        ).distinct()
