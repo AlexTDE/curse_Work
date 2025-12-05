@@ -1,0 +1,209 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+
+<div style="margin-bottom: 20px;">
+    <form method="get" style="display: inline-block;">
+        <label for="days">Период анализа:</label>
+        <select name="days" id="days" onchange="this.form.submit()">
+            <option value="7" {% if days == 7 %}selected{% endif %}>7 дней</option>
+            <option value="30" {% if days == 30 %}selected{% endif %}>30 дней</option>
+            <option value="90" {% if days == 90 %}selected{% endif %}>90 дней</option>
+        </select>
+    </form>
+</div>
+
+{% if analytics %}
+
+<!-- Общая статистика -->
+<div class="module" style="margin-bottom: 20px;">
+    <h2>Общая статистика</h2>
+    <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+            <th style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;">Метрика</th>
+            <th style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;">Значение</th>
+        </tr>
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">Всего тест-кейсов</td>
+            <td style="padding: 10px; border: 1px solid #ddd;"><strong>{{ analytics.overall.total_testcases }}</strong></td>
+        </tr>
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">Всего прогонов</td>
+            <td style="padding: 10px; border: 1px solid #ddd;"><strong>{{ analytics.overall.total_runs }}</strong></td>
+        </tr>
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">Всего дефектов</td>
+            <td style="padding: 10px; border: 1px solid #ddd;"><strong>{{ analytics.overall.total_defects }}</strong></td>
+        </tr>
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">Всего UI-элементов</td>
+            <td style="padding: 10px; border: 1px solid #ddd;"><strong>{{ analytics.overall.total_ui_elements }}</strong></td>
+        </tr>
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">Среднее покрытие</td>
+            <td style="padding: 10px; border: 1px solid #ddd;"><strong>{{ analytics.overall.avg_coverage|floatformat:2 }}%</strong></td>
+        </tr>
+    </table>
+</div>
+
+<!-- Распределение по статусам -->
+<div class="module" style="margin-bottom: 20px;">
+    <h2>Распределение по статусам</h2>
+    
+    <h3>Тест-кейсы</h3>
+    <ul>
+        {% for item in analytics.overall.testcases_by_status %}
+        <li>{{ item.status }}: <strong>{{ item.count }}</strong></li>
+        {% empty %}
+        <li>Нет данных</li>
+        {% endfor %}
+    </ul>
+    
+    <h3>Прогоны</h3>
+    <ul>
+        {% for item in analytics.overall.runs_by_status %}
+        <li>{{ item.status }}: <strong>{{ item.count }}</strong></li>
+        {% empty %}
+        <li>Нет данных</li>
+        {% endfor %}
+    </ul>
+    
+    <h3>Дефекты по серьёзности</h3>
+    <ul>
+        {% for item in analytics.overall.defects_by_severity %}
+        <li>{{ item.severity }}: <strong>{{ item.count }}</strong></li>
+        {% empty %}
+        <li>Нет данных</li>
+        {% endfor %}
+    </ul>
+</div>
+
+<!-- Производительность прогонов -->
+{% if analytics.run_performance %}
+<div class="module" style="margin-bottom: 20px;">
+    <h2>Производительность прогонов за {{ days }} дней</h2>
+    <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+            <th style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;">Метрика</th>
+            <th style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;">Значение</th>
+        </tr>
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">Всего прогонов</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">{{ analytics.run_performance.total_runs }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">Успешно завершенных</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">{{ analytics.run_performance.finished_runs }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">Завершенных с ошибкой</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">{{ analytics.run_performance.failed_runs }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">Success Rate</td>
+            <td style="padding: 10px; border: 1px solid #ddd;"><strong>{{ analytics.run_performance.success_rate }}%</strong></td>
+        </tr>
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">Failure Rate</td>
+            <td style="padding: 10px; border: 1px solid #ddd;"><strong>{{ analytics.run_performance.failure_rate }}%</strong></td>
+        </tr>
+    </table>
+</div>
+{% endif %}
+
+<!-- Статистика по пользователям -->
+{% if analytics.user_stats %}
+<div class="module" style="margin-bottom: 20px;">
+    <h2>Активность пользователей</h2>
+    <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+            <th style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;">Пользователь</th>
+            <th style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;">Создано тест-кейсов</th>
+            <th style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;">Запущено прогонов</th>
+            <th style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;">Создано версий</th>
+            <th style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;">Запросов на обновление</th>
+        </tr>
+        {% for user in analytics.user_stats %}
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">{{ user.username }}</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">{{ user.testcases_created }}</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">{{ user.runs_started }}</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">{{ user.versions_created }}</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">{{ user.update_requests }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endif %}
+
+<!-- Проблемные тест-кейсы -->
+{% if analytics.testcase_performance %}
+<div class="module" style="margin-bottom: 20px;">
+    <h2>Топ-10 проблемных тест-кейсов</h2>
+    <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+            <th style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;">ID</th>
+            <th style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;">Название</th>
+            <th style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;">Дефектов</th>
+            <th style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;">Прогонов</th>
+            <th style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;">Среднее покрытие</th>
+        </tr>
+        {% for tc in analytics.testcase_performance %}
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">{{ tc.id }}</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">{{ tc.title }}</td>
+            <td style="padding: 10px; border: 1px solid #ddd;"><strong>{{ tc.defect_count }}</strong></td>
+            <td style="padding: 10px; border: 1px solid #ddd;">{{ tc.run_count }}</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">{{ tc.avg_coverage }}%</td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="5" style="padding: 10px; border: 1px solid #ddd; text-align: center;">Нет данных</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endif %}
+
+<!-- Версионирование -->
+{% if analytics.versioning %}
+<div class="module" style="margin-bottom: 20px;">
+    <h2>Статистика версионирования</h2>
+    <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+            <th style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;">Метрика</th>
+            <th style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;">Значение</th>
+        </tr>
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">Всего версий</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">{{ analytics.versioning.total_versions }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">Всего запросов на обновление</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">{{ analytics.versioning.total_update_requests }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">Ожидают проверки</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">{{ analytics.versioning.pending_requests }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">Одобрено</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">{{ analytics.versioning.approved_requests }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">Отклонено</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">{{ analytics.versioning.rejected_requests }}</td>
+        </tr>
+    </table>
+</div>
+{% endif %}
+
+{% else %}
+<p>Нет доступных данных для аналитики.</p>
+{% endif %}
+
+{% endblock %}
