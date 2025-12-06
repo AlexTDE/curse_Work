@@ -11,7 +11,19 @@
     
     <div style="margin-bottom: 20px;">
         <h3 style="margin-bottom: 15px;">Создать новый тест-кейс</h3>
-        <form method="post" action="{% url 'create_testcase' %}" enctype="multipart/form-data">
+        
+        <!-- Вывод ошибок валидации -->
+        {% if messages %}
+            {% for message in messages %}
+            <div class="alert alert-{{ message.tags }}" style="padding: 10px; margin-bottom: 15px; border-radius: 5px; 
+                {% if message.tags == 'error' %}background-color: #fee; border: 1px solid #fcc; color: #c33;{% endif %}
+                {% if message.tags == 'success' %}background-color: #efe; border: 1px solid #cfc; color: #3c3;{% endif %}">
+                {{ message }}
+            </div>
+            {% endfor %}
+        {% endif %}
+        
+        <form id="testcaseForm" method="post" action="{% url 'create_testcase' %}" enctype="multipart/form-data">
             {% csrf_token %}
             <div class="form-group">
                 <label>Название:</label>
@@ -23,9 +35,17 @@
             </div>
             <div class="form-group">
                 <label>Эталонный скриншот:</label>
-                <input type="file" name="reference_screenshot" accept="image/*" required>
+                <input type="file" id="referenceScreenshot" name="reference_screenshot" 
+                       accept="image/jpeg,image/jpg,image/png,image/gif,image/bmp,image/webp,image/tiff" required>
+                <small style="color: #666; display: block; margin-top: 5px;">
+                    Разрешены только изображения: JPG, JPEG, PNG, GIF, BMP, WebP, TIFF (макс. 10 MB)
+                </small>
+                <div id="fileError" style="color: #c33; margin-top: 5px; display: none;"></div>
+                <div id="filePreview" style="margin-top: 10px; display: none;">
+                    <img id="previewImage" src="" style="max-width: 200px; max-height: 200px; border: 1px solid #ddd; border-radius: 5px;">
+                </div>
             </div>
-            <button type="submit" class="btn btn-success">✅ Создать тест-кейс</button>
+            <button type="submit" class="btn btn-success" id="submitBtn">✅ Создать тест-кейс</button>
         </form>
     </div>
     
@@ -63,7 +83,7 @@
                         </form>
                         {% endif %}
                         <a href="{% url 'testcase_detail' tc.id %}" class="btn btn-secondary btn-small">👁️ Просмотр</a>
-                        <form method="post" action="{% url 'delete_testcase' tc.id %}" style="display: inline;" onsubmit="return confirm('Вы уверены, что хотите удалить тест-кейс \"{{ tc.title }}\"? Это действие нельзя отменить!');">
+                        <form method="post" action="{% url 'delete_testcase' tc.id %}" style="display: inline;" onsubmit="return confirm('Вы уверены, что хотите удалить тест-кейс "{{ tc.title }}"? Это действие нельзя отменить!');">
                             {% csrf_token %}
                             <button type="submit" class="btn btn-danger btn-small">🗑️ Удалить</button>
                         </form>
@@ -77,5 +97,93 @@
     <p style="color: #666; text-align: center; padding: 40px;">Нет тест-кейсов. Создайте первый выше.</p>
     {% endif %}
 </div>
-{% endblock %}
 
+<script>
+// Валидация изображения на клиенте
+document.getElementById('referenceScreenshot').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    const fileError = document.getElementById('fileError');
+    const filePreview = document.getElementById('filePreview');
+    const previewImage = document.getElementById('previewImage');
+    const submitBtn = document.getElementById('submitBtn');
+    
+    // Очистка предыдущих ошибок
+    fileError.style.display = 'none';
+    fileError.textContent = '';
+    filePreview.style.display = 'none';
+    
+    if (!file) {
+        submitBtn.disabled = false;
+        return;
+    }
+    
+    // Проверка размера (10 MB)
+    const maxSize = 10 * 1024 * 1024;
+    if (file.size > maxSize) {
+        fileError.textContent = 'Ошибка: Размер файла (' + (file.size / (1024*1024)).toFixed(2) + ' MB) превышает максимально допустимый (10 MB)';
+        fileError.style.display = 'block';
+        submitBtn.disabled = true;
+        e.target.value = '';
+        return;
+    }
+    
+    // Проверка MIME-типа
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/webp', 'image/tiff'];
+    if (!validTypes.includes(file.type.toLowerCase())) {
+        fileError.textContent = 'Ошибка: Неподдерживаемый формат файла "' + file.type + '". Разрешены только изображения: JPG, JPEG, PNG, GIF, BMP, WebP, TIFF';
+        fileError.style.display = 'block';
+        submitBtn.disabled = true;
+        e.target.value = '';
+        return;
+    }
+    
+    // Проверка расширения
+    const validExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'tif'];
+    const extension = file.name.split('.').pop().toLowerCase();
+    if (!validExtensions.includes(extension)) {
+        fileError.textContent = 'Ошибка: Неподдерживаемое расширение файла ".' + extension + '". Разрешены только: ' + validExtensions.join(', ').toUpperCase();
+        fileError.style.display = 'block';
+        submitBtn.disabled = true;
+        e.target.value = '';
+        return;
+    }
+    
+    // Показ превью изображения
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        previewImage.src = event.target.result;
+        filePreview.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+    
+    submitBtn.disabled = false;
+});
+
+// Дополнительная проверка перед отправкой формы
+document.getElementById('testcaseForm').addEventListener('submit', function(e) {
+    const fileInput = document.getElementById('referenceScreenshot');
+    const file = fileInput.files[0];
+    
+    if (!file) {
+        e.preventDefault();
+        alert('Пожалуйста, выберите эталонный скриншот');
+        return false;
+    }
+    
+    // Еще раз проверяем перед отправкой
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/webp', 'image/tiff'];
+    if (!validTypes.includes(file.type.toLowerCase())) {
+        e.preventDefault();
+        alert('Ошибка: Можно загружать только изображения (JPG, JPEG, PNG, GIF, BMP, WebP, TIFF)');
+        return false;
+    }
+    
+    const maxSize = 10 * 1024 * 1024;
+    if (file.size > maxSize) {
+        e.preventDefault();
+        alert('Ошибка: Размер файла превышает 10 MB');
+        return false;
+    }
+});
+</script>
+{% endblock %}
