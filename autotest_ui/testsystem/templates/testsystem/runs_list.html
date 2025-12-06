@@ -11,22 +11,55 @@
     
     <div style="margin-bottom: 20px;">
         <h3 style="margin-bottom: 15px;">Создать новый прогон</h3>
-        <form method="post" action="{% url 'create_run' %}" enctype="multipart/form-data">
+        
+        <!-- Вывод ошибок валидации -->
+        {% if messages %}
+            {% for message in messages %}
+            <div class="alert alert-{{ message.tags }}" style="padding: 10px; margin-bottom: 15px; border-radius: 5px; 
+                {% if message.tags == 'error' %}background-color: #fee; border: 1px solid #fcc; color: #c33;{% endif %}
+                {% if message.tags == 'success' %}background-color: #efe; border: 1px solid #cfc; color: #3c3;{% endif %}
+                {% if message.tags == 'warning' %}background-color: #fff3cd; border: 1px solid #ffc107; color: #856404;{% endif %}">
+                {{ message }}
+            </div>
+            {% endfor %}
+        {% endif %}
+        
+        <form id="runForm" method="post" action="{% url 'create_run' %}" enctype="multipart/form-data">
             {% csrf_token %}
             <div class="form-group">
                 <label>Тест-кейс:</label>
-                <select name="testcase_id" required>
+                <select id="testcaseSelect" name="testcase_id" required>
                     <option value="">Выберите тест-кейс</option>
                     {% for tc in testcases %}
-                    <option value="{{ tc.id }}">{{ tc.id }} - {{ tc.title }} ({{ tc.get_status_display }})</option>
+                        {% if tc.status == 'analyzed' or tc.status == 'ready' %}
+                        <option value="{{ tc.id }}" data-status="{{ tc.status }}">
+                            {{ tc.id }} - {{ tc.title }} (✅ {{ tc.get_status_display }})
+                        </option>
+                        {% endif %}
                     {% endfor %}
                 </select>
+                <small style="color: #666; display: block; margin-top: 5px;">
+                    Доступны только проанализированные тест-кейсы (со статусом "Analyzed" или "Ready")
+                </small>
+                {% if not testcases or not testcases|length %}
+                <div style="color: #c33; margin-top: 10px; padding: 10px; background: #fee; border: 1px solid #fcc; border-radius: 5px;">
+                    ⚠️ Нет доступных тест-кейсов. Сначала создайте и проанализируйте тест-кейс.
+                </div>
+                {% endif %}
             </div>
             <div class="form-group">
                 <label>Текущий скриншот:</label>
-                <input type="file" name="actual_screenshot" accept="image/*" required>
+                <input type="file" id="actualScreenshot" name="actual_screenshot" 
+                       accept="image/jpeg,image/jpg,image/png,image/gif,image/bmp,image/webp,image/tiff" required>
+                <small style="color: #666; display: block; margin-top: 5px;">
+                    Разрешены только изображения: JPG, JPEG, PNG, GIF, BMP, WebP, TIFF (макс. 10 MB)
+                </small>
+                <div id="fileError" style="color: #c33; margin-top: 5px; display: none;"></div>
+                <div id="filePreview" style="margin-top: 10px; display: none;">
+                    <img id="previewImage" src="" style="max-width: 200px; max-height: 200px; border: 1px solid #ddd; border-radius: 5px;">
+                </div>
             </div>
-            <button type="submit" class="btn btn-success">📸 Создать прогон</button>
+            <button type="submit" class="btn btn-success" id="submitBtn">📸 Создать прогон</button>
         </form>
     </div>
     
@@ -84,5 +117,113 @@
     <p style="color: #666; text-align: center; padding: 40px;">Нет прогонов. Создайте первый выше.</p>
     {% endif %}
 </div>
-{% endblock %}
 
+<script>
+// Валидация изображения на клиенте
+document.getElementById('actualScreenshot').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    const fileError = document.getElementById('fileError');
+    const filePreview = document.getElementById('filePreview');
+    const previewImage = document.getElementById('previewImage');
+    const submitBtn = document.getElementById('submitBtn');
+    
+    // Очистка предыдущих ошибок
+    fileError.style.display = 'none';
+    fileError.textContent = '';
+    filePreview.style.display = 'none';
+    
+    if (!file) {
+        submitBtn.disabled = false;
+        return;
+    }
+    
+    // Проверка размера (10 MB)
+    const maxSize = 10 * 1024 * 1024;
+    if (file.size > maxSize) {
+        fileError.textContent = 'Ошибка: Размер файла (' + (file.size / (1024*1024)).toFixed(2) + ' MB) превышает максимально допустимый (10 MB)';
+        fileError.style.display = 'block';
+        submitBtn.disabled = true;
+        e.target.value = '';
+        return;
+    }
+    
+    // Проверка MIME-типа
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/webp', 'image/tiff'];
+    if (!validTypes.includes(file.type.toLowerCase())) {
+        fileError.textContent = 'Ошибка: Неподдерживаемый формат файла "' + file.type + '". Разрешены только изображения: JPG, JPEG, PNG, GIF, BMP, WebP, TIFF';
+        fileError.style.display = 'block';
+        submitBtn.disabled = true;
+        e.target.value = '';
+        return;
+    }
+    
+    // Проверка расширения
+    const validExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'tif'];
+    const extension = file.name.split('.').pop().toLowerCase();
+    if (!validExtensions.includes(extension)) {
+        fileError.textContent = 'Ошибка: Неподдерживаемое расширение файла ".' + extension + '". Разрешены только: ' + validExtensions.join(', ').toUpperCase();
+        fileError.style.display = 'block';
+        submitBtn.disabled = true;
+        e.target.value = '';
+        return;
+    }
+    
+    // Показ превью изображения
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        previewImage.src = event.target.result;
+        filePreview.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+    
+    submitBtn.disabled = false;
+});
+
+// Дополнительная проверка перед отправкой формы
+document.getElementById('runForm').addEventListener('submit', function(e) {
+    const testcaseSelect = document.getElementById('testcaseSelect');
+    const fileInput = document.getElementById('actualScreenshot');
+    const file = fileInput.files[0];
+    
+    // Проверка выбора тест-кейса
+    if (!testcaseSelect.value) {
+        e.preventDefault();
+        alert('Пожалуйста, выберите тест-кейс');
+        return false;
+    }
+    
+    // Проверка наличия файла
+    if (!file) {
+        e.preventDefault();
+        alert('Пожалуйста, выберите скриншот');
+        return false;
+    }
+    
+    // Еще раз проверяем перед отправкой
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/webp', 'image/tiff'];
+    if (!validTypes.includes(file.type.toLowerCase())) {
+        e.preventDefault();
+        alert('Ошибка: Можно загружать только изображения (JPG, JPEG, PNG, GIF, BMP, WebP, TIFF)');
+        return false;
+    }
+    
+    const maxSize = 10 * 1024 * 1024;
+    if (file.size > maxSize) {
+        e.preventDefault();
+        alert('Ошибка: Размер файла превышает 10 MB');
+        return false;
+    }
+});
+
+// Подсказка если нет доступных тест-кейсов
+window.addEventListener('DOMContentLoaded', function() {
+    const testcaseSelect = document.getElementById('testcaseSelect');
+    const optionsCount = testcaseSelect.options.length - 1; // -1 для "Выберите тест-кейс"
+    
+    if (optionsCount === 0) {
+        document.getElementById('submitBtn').disabled = true;
+        document.getElementById('actualScreenshot').disabled = true;
+    }
+});
+</script>
+{% endblock %}
