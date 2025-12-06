@@ -1,6 +1,8 @@
 from rest_framework import serializers
+from django.core.exceptions import ValidationError as DjangoValidationError
 
 from .models import CoverageMetric, Defect, Run, TestCase, UIElement
+from .validators import validate_image_file
 
 
 class UIElementSerializer(serializers.ModelSerializer):
@@ -24,6 +26,17 @@ class DefectSerializer(serializers.ModelSerializer):
         model = Defect
         fields = ['id', 'testcase', 'run', 'element', 'description', 'severity', 'screenshot', 'metadata', 'created_at']
         read_only_fields = ['id', 'testcase', 'run', 'created_at']
+    
+    def validate_screenshot(self, value):
+        """
+        Валидация скриншота дефекта
+        """
+        if value:
+            try:
+                validate_image_file(value)
+            except DjangoValidationError as e:
+                raise serializers.ValidationError(e.messages)
+        return value
 
 
 class RunSerializer(serializers.ModelSerializer):
@@ -63,6 +76,20 @@ class RunSerializer(serializers.ModelSerializer):
             'defects',
             'started_by',
         ]
+    
+    def validate_actual_screenshot(self, value):
+        """
+        Валидация скриншота прогона
+        """
+        if not value:
+            raise serializers.ValidationError("Скриншот обязателен для создания прогона")
+        
+        try:
+            validate_image_file(value)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.messages)
+        
+        return value
 
 
 class TestCaseSerializer(serializers.ModelSerializer):
@@ -84,3 +111,17 @@ class TestCaseSerializer(serializers.ModelSerializer):
             'defects',
         ]
         read_only_fields = ['id', 'created_at', 'status', 'created_by', 'elements', 'defects']
+    
+    def validate_reference_screenshot(self, value):
+        """
+        Валидация эталонного скриншота
+        """
+        if not value:
+            raise serializers.ValidationError("Эталонный скриншот обязателен")
+        
+        try:
+            validate_image_file(value)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.messages)
+        
+        return value
