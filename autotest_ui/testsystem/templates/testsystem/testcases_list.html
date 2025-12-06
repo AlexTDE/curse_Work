@@ -83,7 +83,8 @@
                         </form>
                         {% endif %}
                         <a href="{% url 'testcase_detail' tc.id %}" class="btn btn-secondary btn-small">👁️ Просмотр</a>
-                        <form method="post" action="{% url 'delete_testcase' tc.id %}" style="display: inline;" onsubmit="return confirm('Вы уверены, что хотите удалить тест-кейс "{{ tc.title }}"? Это действие нельзя отменить!');">
+                        <form method="post" action="{% url 'delete_testcase' tc.id %}" style="display: inline;" 
+                              onsubmit="return confirmDelete('{{ tc.title|escapejs }}', {{ tc.id }}, {{ tc.elements.count }}, {{ tc.runs.count }});">
                             {% csrf_token %}
                             <button type="submit" class="btn btn-danger btn-small">🗑️ Удалить</button>
                         </form>
@@ -99,6 +100,41 @@
 </div>
 
 <script>
+// Функция подтверждения удаления тест-кейса
+function confirmDelete(title, id, elementsCount, runsCount) {
+    let message = '⚠️ УДАЛЕНИЕ ТЕСТ-КЕЙСА\n\n';
+    message += 'Тест-кейс: "' + title + '" (ID: ' + id + ')\n';
+    message += '\nБудет удалено:\n';
+    message += '  • ' + elementsCount + ' UI элемент' + getPlural(elementsCount, '', 'а', 'ов') + '\n';
+    message += '  • ' + runsCount + ' прогон' + getPlural(runsCount, '', 'а', 'ов') + '\n';
+    
+    if (runsCount > 0) {
+        message += '\n🚨 ВНИМАНИЕ: Также будут удалены все связанные прогоны и дефекты!\n';
+    }
+    
+    message += '\nЭто действие НЕЛЬЗЯ отменить!\n';
+    message += '\nВы уверены, что хотите удалить этот тест-кейс?';
+    
+    return confirm(message);
+}
+
+// Вспомогательная функция для правильного склонения
+function getPlural(number, one, two, five) {
+    let n = Math.abs(number);
+    n %= 100;
+    if (n >= 5 && n <= 20) {
+        return five;
+    }
+    n %= 10;
+    if (n === 1) {
+        return one;
+    }
+    if (n >= 2 && n <= 4) {
+        return two;
+    }
+    return five;
+}
+
 // Валидация изображения на клиенте
 document.getElementById('referenceScreenshot').addEventListener('change', function(e) {
     const file = e.target.files[0];
