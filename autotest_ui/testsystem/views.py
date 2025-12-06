@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
+from django.core.exceptions import ValidationError as DjangoValidationError
 
 from .models import CoverageMetric, Defect, Run, TestCase, UIElement
 from .serializers import (
@@ -14,6 +15,7 @@ from .serializers import (
 )
 from .tasks import compare_reference_with_actual, generate_test_from_screenshot
 from .ci_integration.utils import get_ci_status_summary
+from .validators import validate_image_file
 
 
 class IsOwnerOrAdmin(permissions.BasePermission):
@@ -69,6 +71,14 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         """
         При создании автоматически назначаем текущего пользователя как created_by
         """
+        # Валидация изображения
+        reference_screenshot = serializer.validated_data.get('reference_screenshot')
+        if reference_screenshot:
+            try:
+                validate_image_file(reference_screenshot)
+            except DjangoValidationError as e:
+                raise ValidationError({'reference_screenshot': e.messages})
+        
         serializer.save(created_by=self.request.user)
     
     def perform_destroy(self, instance):
@@ -139,8 +149,18 @@ class RunViewSet(viewsets.ModelViewSet):
         """
         При создании автоматически назначаем текущего пользователя как started_by
         """
-        if not serializer.validated_data.get('actual_screenshot'):
-            raise ValidationError({'actual_screenshot': 'Screenshot is required for a run'})
+        actual_screenshot = serializer.validated_data.get('actual_screenshot')
+        
+        # Проверка наличия скриншота
+        if not actual_screenshot:
+            raise ValidationError({'actual_screenshot': 'Скриншот обязателен для создания прогона'})
+        
+        # Валидация изображения
+        try:
+            validate_image_file(actual_screenshot)
+        except DjangoValidationError as e:
+            raise ValidationError({'actual_screenshot': e.messages})
+        
         serializer.save(started_by=self.request.user, status='processing')
     
     def perform_destroy(self, instance):
