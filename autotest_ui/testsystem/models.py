@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth import get_user_model
+from .validators import validate_image_file
 
 User = get_user_model()
 
@@ -16,7 +17,13 @@ class Run(models.Model):
     started_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default='queued')
-    actual_screenshot = models.ImageField(upload_to='runs/', null=True, blank=True)
+    actual_screenshot = models.ImageField(
+        upload_to='runs/', 
+        null=True, 
+        blank=True,
+        validators=[validate_image_file],
+        help_text='Только изображения: JPG, JPEG, PNG, GIF, BMP, WebP, TIFF (макс. 10 MB)'
+    )
     details = models.TextField(blank=True)
     reference_diff_score = models.FloatField(null=True, blank=True)
     coverage = models.FloatField(null=True, blank=True)
@@ -31,7 +38,11 @@ class TestCase(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
-    reference_screenshot = models.ImageField(upload_to='references/')
+    reference_screenshot = models.ImageField(
+        upload_to='references/',
+        validators=[validate_image_file],
+        help_text='Только изображения: JPG, JPEG, PNG, GIF, BMP, WebP, TIFF (макс. 10 MB)'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     STATUS_CHOICES = [
@@ -85,7 +96,13 @@ class Defect(models.Model):
     element = models.ForeignKey(UIElement, null=True, blank=True, on_delete=models.SET_NULL, related_name='defects')
     description = models.TextField()
     severity = models.CharField(max_length=16, choices=SEVERITY_CHOICES, default='minor')
-    screenshot = models.ImageField(upload_to='defects/', null=True, blank=True)
+    screenshot = models.ImageField(
+        upload_to='defects/', 
+        null=True, 
+        blank=True,
+        validators=[validate_image_file],
+        help_text='Только изображения: JPG, JPEG, PNG, GIF, BMP, WebP, TIFF (макс. 10 MB)'
+    )
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
